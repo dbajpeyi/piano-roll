@@ -15,6 +15,9 @@ function createWindow() {
   // Float above normal windows, on every Space, and over full-screen apps.
   win.setAlwaysOnTop(true, 'floating');
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  // visibleOnFullScreen turns the app into a background (UI element) app, which
+  // hides it from the Dock and Cmd+Tab. Bring the Dock icon back.
+  app.dock.show();
 
   // App-only styles, so the web version stays untouched: make the window
   // draggable, keep the toggles clickable, and clear the traffic-light buttons.
