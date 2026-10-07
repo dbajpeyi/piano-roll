@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Piano Roll</title>
+<style>
+  body {
+    margin: 0;
+    padding: 20px;
+    font-family: sans-serif;
+    background: #222;
+    color: #ddd;
+  }
+  #status {
+    margin-bottom: 12px;
+    font-size: 14px;
+  }
+  #piano {
+    position: relative;
+    display: flex;
+    height: 180px;
+    width: 100%;
+  }
+  .white {
+    flex: 1;
+    background: #fff;
+    border: 1px solid #333;
+    box-sizing: border-box;
+  }
+  .black {
+    position: absolute;
+    top: 0;
+    height: 60%;
+    background: #000;
+    z-index: 1;
+  }
+  #controls {
+    margin-bottom: 12px;
+    font-size: 14px;
+  }
+  #controls label { margin-right: 16px; }
+  #chord {
+    height: 32px;
+    font-size: 24px;
+    margin-bottom: 8px;
+  }
+  .white, .black {
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    padding-bottom: 6px;
+    font-size: 11px;
+    color: #000;
+  }
+  .black { color: #fff; box-sizing: border-box; }
+  .white.on { background: #4da3ff; }
+  .black.on { background: #1a6fd1; }
+</style>
+</head>
+<body>
+<div id="status">Waiting for MIDI…</div>
+<div id="controls">
+  <label><input type="checkbox" id="testToggle"> Test mode</label>
+  <label><input type="checkbox" id="namesToggle"> Note names</label>
+  <label><input type="checkbox" id="chordToggle"> Chords</label>
+</div>
+<div id="chord" hidden></div>
+<div id="piano"></div>
+
+<script>
+  const FIRST = 21;  // A0
+  const LAST = 108;  // C8
+  const BLACK = [1, 3, 6, 8, 10];
+  const piano = document.getElementById('piano');
+  const status = document.getElementById('status');
+  const keys = {};
+  // Default spelling when there's no chord to spell against: flats.
+  const NAMES = ['C', 'D♭', 'D', 'E♭', 'E', 'F', 'G♭', 'G', 'A♭', 'A', 'B♭', 'B'];
+  const active = new Set();  // notes currently held down
+
+  const whiteCount = [...Array(LAST - FIRST + 1)]
+    .filter((_, i) => !BLACK.includes((FIRST + i) % 12)).length;
+  const whiteWidth = 100 / whiteCount;
+  const blackWidth = whiteWidth * 0.6;
+
+  let whitesSoFar = 0;
+  for (let note = FIRST; note <= LAST; note++) {
+    const el = document.createElement('div');
+    if (BLACK.includes(note % 12)) {
+      el.className = 'black';
+      el.style.left = (whitesSoFar * whiteWidth - blackWidth / 2) + '%';
+      el.style.width = blackWidth + '%';
+    } else {
+      el.className = 'white';
+      whitesSoFar++;
+    }
+    piano.appendChild(el);
+    keys[note] = el;
+  }
+
+  function onMessage(e) {
+    const [cmd, note, velocity] = e.data;
+    const type = cmd & 0xf0;
+    const key = keys[note];
+    if (!key) return;
+    if (type === 0x90 && velocity > 0) {
+      key.classList.add('on');
+      active.add(note);
+    } else if (type === 0x80 || type === 0x90) {
+      key.classList.remove('on');
+      active.delete(note);
+    } else {
+      return;
+    }
+    render();
+  }
+
+  // Note names: label only the keys that are held down.
+  const namesToggle = document.getElementById('namesToggle');
+  const chordToggle = document.getElementById('chordToggle');
+  const chordEl = document.getElementById('chord');
+
+  // [suffix, intervals from the root, scale degree of each interval]
+  const CHORDS = [
+    ['', [0, 4, 7], [1, 3, 5]], ['m', [0, 3, 7], [1, 3, 5]],
+    ['dim', [0, 3, 6], [1, 3, 5]], ['aug', [0, 4, 8], [1, 3, 5]],
+    ['sus2', [0, 2, 7], [1, 2, 5]], ['sus4', [0, 5, 7], [1, 4, 5]],
+    ['5', [0, 7], [1, 5]],
+    ['7', [0, 4, 7, 10], [1, 3, 5, 7]], ['maj7', [0, 4, 7, 11], [1, 3, 5, 7]],
+    ['m7', [0, 3, 7, 10], [1, 3, 5, 7]], ['mMaj7', [0, 3, 7, 11], [1, 3, 5, 7]],
+    ['m7♭5', [0, 3, 6, 10], [1, 3, 5, 7]], ['dim7', [0, 3, 6, 9], [1, 3, 5, 7]],
+    ['6', [0, 4, 7, 9], [1, 3, 5, 6]], ['m6', [0, 3, 7, 9], [1, 3, 5, 6]],
+    ['7sus4', [0, 5, 7, 10], [1, 4, 5, 7]],
+    ['add9', [0, 2, 4, 7], [1, 2, 3, 5]], ['madd9', [0, 2, 3, 7], [1, 2, 3, 5]],
+    ['9', [0, 2, 4, 7, 10], [1, 2, 3, 5, 7]], ['maj9', [0, 2, 4, 7, 11], [1, 2, 3, 5, 7]],
+    ['m9', [0, 2, 3, 7, 10], [1, 2, 3, 5, 7]]
+  ];
+
+  const LETTERS = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
+  const LETTER_PC = [0, 2, 4, 5, 7, 9, 11];
+
+  function accidental(n) {
+    return { '-2': '𝄫', '-1': '♭', '0': '', '1': '♯', '2': '𝄪' }[n];
+  }
+
+  // Spell every chord tone from a given root spelling (letter index + accidental),
+  // so each tone gets the letter of its scale degree: Cm -> C E♭ G, not C D# G.
+  function spellChord(letter, acc, intervals, degrees) {
+    const rootPc = (LETTER_PC[letter] + acc + 12) % 12;
+    return intervals.map((iv, i) => {
+      const l = (letter + degrees[i] - 1) % 7;
+      const a = ((rootPc + iv - LETTER_PC[l]) % 12 + 18) % 12 - 6;
+      return { pc: (rootPc + iv) % 12, letter: l, acc: a, name: LETTERS[l] + accidental(a) };
+    });
+  }
+
+  // A black-key root can be spelled two ways (C♯/D♭). Pick whichever gives the
+  // chord fewer accidentals; on a tie, prefer flats.
+  function bestSpelling(rootPc, intervals, degrees) {
+    let best = null;
+    for (let letter = 0; letter < 7; letter++) {
+      const acc = ((rootPc - LETTER_PC[letter]) % 12 + 18) % 12 - 6;
+      if (Math.abs(acc) > 1 || (acc !== 0 && 'EBCF'.includes(LETTERS[letter]) &&
+          (acc > 0) === 'EB'.includes(LETTERS[letter]))) continue;  // skip E♯ B♯ C♭ F♭
+      const tones = spellChord(letter, acc, intervals, degrees);
+      const cost = tones.reduce((sum, t) => sum + Math.abs(t.acc), 0);
+      if (!best || cost < best.cost || (cost === best.cost && acc < 0)) best = { tones, cost };
+    }
+    return best.tones;
+  }
+
+  // Match the held pitch classes against each chord shape on each possible root.
+  // Prefer a root that is the lowest note; otherwise name it as a slash chord.
+  // Returns the chord name and a pitch-class -> spelled-name map for the key labels.
+  function detectChord(notes) {
+    if (notes.length < 2) return null;
+    const bass = Math.min(...notes) % 12;
+    const pcs = [...new Set(notes.map(n => n % 12))];
+    const roots = [bass, ...pcs.filter(p => p !== bass)];
+    for (const root of roots) {
+      const shape = pcs.map(p => (p - root + 12) % 12).sort((a, b) => a - b).join();
+      const match = CHORDS.find(([, iv]) => iv.join() === shape);
+      if (match) {
+        const tones = bestSpelling(root, match[1], match[2]);
+        const spelled = {};
+        for (const t of tones) spelled[t.pc] = t.name;
+        const name = tones[0].name + match[0];
+        return { name: root === bass ? name : name + '/' + spelled[bass], spelled };
+      }
+    }
+    return { name: '?', spelled: {} };
+  }
+
+  function render() {
+    const chord = detectChord([...active]);
+    const spelled = chord ? chord.spelled : {};
+    for (let note = FIRST; note <= LAST; note++) {
+      const pc = note % 12;
+      keys[note].textContent = namesToggle.checked && active.has(note) ? spelled[pc] || NAMES[pc] : '';
+    }
+    chordEl.hidden = !chordToggle.checked;
+    chordEl.textContent = chordToggle.checked && chord ? chord.name : '';
+  }
+
+  namesToggle.addEventListener('change', () => { namesToggle.blur(); render(); });
+  chordToggle.addEventListener('change', () => { chordToggle.blur(); render(); });
+
+  // Test mode: play notes from the computer keyboard (piano-style layout).
+  const KEYMAP = {
+    KeyA: 0, KeyW: 1, KeyS: 2, KeyE: 3, KeyD: 4, KeyF: 5, KeyT: 6,
+    KeyG: 7, KeyY: 8, KeyH: 9, KeyU: 10, KeyJ: 11, KeyK: 12
+  };
+  const testToggle = document.getElementById('testToggle');
+  let octave = 4;
+  const held = {};  // key code -> note currently sounding
+
+  function releaseAll() {
+    for (const code in held) {
+      onMessage({ data: [0x80, held[code], 0] });
+      delete held[code];
+    }
+  }
+
+  testToggle.addEventListener('change', () => {
+    testToggle.blur();
+    releaseAll();
+  });
+
+  document.addEventListener('keydown', e => {
+    if (!testToggle.checked || e.repeat || e.metaKey || e.ctrlKey) return;
+    if (e.code === 'KeyZ' || e.code === 'KeyX') {
+      octave = Math.min(7, Math.max(1, octave + (e.code === 'KeyX' ? 1 : -1)));
+      return;
+    }
+    if (!(e.code in KEYMAP)) return;
+    const note = 12 * (octave + 1) + KEYMAP[e.code];
+    held[e.code] = note;
+    onMessage({ data: [0x90, note, 100] });
+  });
+
+  document.addEventListener('keyup', e => {
+    if (!(e.code in held)) return;
+    onMessage({ data: [0x80, held[e.code], 0] });
+    delete held[e.code];
+  });
+
+  window.addEventListener('blur', releaseAll);
+
+  function bindInputs(access) {
+    const names = [];
+    access.inputs.forEach(input => {
+      input.onmidimessage = onMessage;
+      names.push(input.name);
+    });
+    status.textContent = names.length
+      ? 'Connected: ' + names.join(', ')
+      : 'No MIDI devices found. Plug one in.';
+  }
+
+  if (navigator.requestMIDIAccess) {
+    navigator.requestMIDIAccess().then(access => {
+      bindInputs(access);
+      access.onstatechange = () => bindInputs(access);
+    }, () => {
+      status.textContent = 'MIDI access denied.';
+    });
+  } else {
+    status.textContent = 'Web MIDI is not supported in this browser. Try Chrome or Edge.';
+  }
+</script>
+</body>
+</html>

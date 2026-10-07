@@ -1,0 +1,28 @@
+{
+  "name": "piano-roll",
+  "productName": "Piano Roll",
+  "version": "1.0.0",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --mac --dir",
+    "deploy": "wrangler deploy"
+  },
+  "build": {
+    "appId": "com.dbajpeyi.pianoroll",
+    "files": [
+      "main.js",
+      "public/**/*"
+    ],
+    "mac": {
+      "category": "public.app-category.music",
+      "identity": "-",
+      "hardenedRuntime": false
+    }
+  },
+  "devDependencies": {
+    "electron": "^44.6.0",
+    "electron-builder": "^26.15.3"
+  }
+}
